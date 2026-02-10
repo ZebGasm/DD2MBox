@@ -58,7 +58,7 @@ class ShoppingOverlay(tk.Toplevel):
         self.master = master
         self.overrideredirect(True)
         self.attributes('-topmost', True)
-        # self.attributes('-alpha', 0.6) # Removed to avoid conflict with transparentcolor
+        self.attributes('-alpha', 0.6) # Set transparency for the entire overlay
 
         # Use a transparent color to make the window background invisible
         # Using magenta, a color unlikely to be in game content
@@ -72,6 +72,25 @@ class ShoppingOverlay(tk.Toplevel):
         self.shopping_squares = []
         self.utility_squares = []
 
+        # Catppuccin Mocha colors for the boxes
+        catppuccin_colors = [
+            '#f5e0dc',  # Rosewater
+            '#f2cdcd',  # Flamingo
+            '#f5c2e7',  # Pink
+            '#cba6f7',  # Mauve
+            '#f38ba8',  # Red
+            '#eba0ac',  # Maroon
+            '#fab387',  # Peach
+            '#f9e2af',  # Yellow
+            '#a6e3a1',  # Green
+            '#94e2d5',  # Teal
+            '#89dceb',  # Sky
+            '#74c7ec',  # Sapphire
+            '#89b4fa',  # Blue
+            '#b4befe'   # Lavender
+        ]
+        text_color = '#1E1E2E' # Dark text for light-colored boxes
+
         # Default positions for shopping boxes if not provided or malformed
         default_shopping_positions = [{'x': 50 + (i * 60), 'y': 50} for i in range(8)]
         shopping_positions = initial_positions.get('shopping_boxes', default_shopping_positions) if isinstance(initial_positions, dict) else default_shopping_positions
@@ -81,14 +100,21 @@ class ShoppingOverlay(tk.Toplevel):
         utility_positions = initial_positions.get('utility_boxes', default_utility_positions) if isinstance(initial_positions, dict) else default_utility_positions
 
         for i, pos in enumerate(shopping_positions):
-            square = DraggableSquare(self, box_number=i+1, bg_color='grey', text_color='white', width=50, height=50) # Explicitly set size
+            bg_color = catppuccin_colors[i % len(catppuccin_colors)]
+            square = DraggableSquare(self, box_number=i+1, bg_color=bg_color, text_color=text_color, width=50, height=50) # Explicitly set size
             square.place(x=pos.get('x', 50 + (i * 60)), y=pos.get('y', 50))
             self.shopping_squares.append(square)
 
         for i, pos in enumerate(utility_positions):
-            square = DraggableSquare(self, box_number=i+1, bg_color='purple', text_color='white', width=25, height=25) # Half size
+            # Start utility box colors from a different index to ensure they don't repeat the first few shopping box colors
+            bg_color = catppuccin_colors[(i + 8) % len(catppuccin_colors)]
+            square = DraggableSquare(self, box_number=f"U{i+1}", bg_color=bg_color, text_color=text_color, width=25, height=25) # Half size
             square.place(x=pos.get('x', 50 + (i * 60)), y=pos.get('y', 150))
             self.utility_squares.append(square)
+        
+        # Add a "Shop" label next to the utility boxes
+        self.shop_label = tk.Label(self, text="SHOP", font=("Arial", 10, "bold"), fg=text_color, bg=self.transparent_color)
+        self.shop_label.place(x=230, y=150) # Position to the right of the utility boxes
 
         self.is_click_through = False
         self.master.update_status("Shopping overlay created in SETUP mode.")
@@ -157,9 +183,11 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         
         self.select_mode = False
         self.mouse_listener = None
-        self.rotation_hook_ids = {} # hotkey hook references
+        
+        self.ahk_hook_ids = {} # All AHK style hotkey hook references
+        self.ahk_keybinds_enabled = True # Controls all AHK style hotkeys
 
-        self.rotation_hotkeys_enabled = True # New state variable
+        self.broadcasting_hotkeys_enabled = True # Controls hotkeys for broadcasting (P, N, Y, G, PgUp, PgDn, B)
 
         self.key_map = {
             'g': ord('G'),
@@ -197,9 +225,8 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         self.create_widgets() # New method to set up GUI
         
         self._register_ahk_hotkeys()
-        # Initialize rotation hotkeys based on the rotation_hotkeys_enabled state
-        if self.rotation_hotkeys_enabled:
-            self._enable_rotation_hotkeys()
+        self.ahk_keybinds_toggle_button.config(style='On.TButton') # Set initial style to 'On'
+        # All AHK hotkeys are now managed by _enable_ahk_keybinds, called by _register_ahk_hotkeys
 
         # Find and apply initial window layout
         self.find_dd2_windows()
@@ -263,6 +290,15 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
                   background=[('pressed', self.theme['fg_alt']), ('active', self.theme['bg_alt'])],
                   foreground=[('pressed', self.theme['bg']), ('active', self.theme['fg'])])
         
+        # New style for 'ON' state buttons
+        style.configure('On.TButton',
+                        bordercolor='green', # Green border when 'on'
+                        relief='solid',
+                        borderwidth=2) # Make border slightly thicker for emphasis
+        style.map('On.TButton',
+                  background=[('pressed', 'darkgreen'), ('active', 'forestgreen')],
+                  foreground=[('pressed', self.theme['fg']), ('active', self.theme['fg'])])
+        
         # Scrollbar
         style.configure("TScrollbar",
                 background=self.theme['bg'],
@@ -299,8 +335,8 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         hotkey_frame = ttk.LabelFrame(control_panels_container, text="[ HOTKEY STATUS ]", padding=10)
         hotkey_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        self.rotation_status_label = ttk.Label(hotkey_frame, text="Rotation (Up/Down): ENABLED", style='Status.TLabel')
-        self.rotation_status_label.pack(anchor=tk.W, pady=2)
+        self.ahk_keybinds_status_label = ttk.Label(hotkey_frame, text="AHK Keybinds: ENABLED", style='Status.TLabel')
+        self.ahk_keybinds_status_label.pack(anchor=tk.W, pady=2)
         
         self.g_presser_status_label = ttk.Label(hotkey_frame, text="G-Presser (F7): OFF", style='Status.TLabel')
         self.g_presser_status_label.pack(anchor=tk.W, pady=2)
@@ -315,8 +351,8 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         actions_frame = ttk.LabelFrame(control_panels_container, text="[ ACTIONS ]", padding=10)
         actions_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        self.rotation_toggle_button = ttk.Button(actions_frame, text="Toggle Rotation", command=self._toggle_rotation_hotkeys)
-        self.rotation_toggle_button.pack(fill=tk.X, pady=4)
+        self.ahk_keybinds_toggle_button = ttk.Button(actions_frame, text="Toggle AHK Keybinds", command=self._toggle_ahk_keybinds)
+        self.ahk_keybinds_toggle_button.pack(fill=tk.X, pady=4)
         
         self.g_presser_toggle_button = ttk.Button(actions_frame, text="Toggle G-Presser", command=self._toggle_g_presser_gui)
         self.g_presser_toggle_button.pack(fill=tk.X, pady=4)
@@ -475,8 +511,8 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
                 time.sleep(0.1)
 
             self.original_cursor_pos = win32api.GetCursorPos()
-            self.esc_hook_id = keyboard.add_hotkey('ctrl+alt+s', self._handle_esc_press)
-            self.update_status("Hotkeys: ctrl+alt+s to stop auto-shopping.")
+            self.esc_hook_id = keyboard.add_hotkey('esc', self._handle_esc_press)
+            self.update_status("Hotkeys: ESC to stop auto-shopping.")
             self._shopping_loop(0, 0)
 
         elif self.shopping_mode_state == "AUTO-RUN":
@@ -538,33 +574,43 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         else:
             self.update_status(f"Error: Utility box #{box_number} is out of range.")
             
-    def _toggle_rotation_hotkeys(self):
-        """Toggles the state of UP/DOWN hotkeys."""
-        self.rotation_hotkeys_enabled = not self.rotation_hotkeys_enabled
-        if self.rotation_hotkeys_enabled:
-            self._enable_rotation_hotkeys()
-            self.rotation_status_label.config(text="Rotation (Up/Down): ENABLED")
-            self.update_status("Rotation hotkeys ENABLED.")
+    def _toggle_ahk_keybinds(self):
+        """Toggles the state of all AHK keybinds."""
+        self.ahk_keybinds_enabled = not self.ahk_keybinds_enabled
+        if self.ahk_keybinds_enabled:
+            self._enable_ahk_keybinds()
+            self.ahk_keybinds_status_label.config(text="AHK Keybinds: ENABLED")
+            self.ahk_keybinds_toggle_button.config(style='On.TButton') # Apply 'On' style
+            self.update_status("AHK Keybinds ENABLED.")
         else:
-            self._disable_rotation_hotkeys()
-            self.rotation_status_label.config(text="Rotation (Up/Down): DISABLED")
-            self.update_status("Rotation hotkeys DISABLED.")
+            self._disable_ahk_keybinds()
+            self.ahk_keybinds_status_label.config(text="AHK Keybinds: DISABLED")
+            self.ahk_keybinds_toggle_button.config(style='TButton') # Revert to default style
+            self.update_status("AHK Keybinds DISABLED.")
 
-    def _enable_rotation_hotkeys(self):
-        """Registers the UP and DOWN hotkeys to be active."""
-        self.rotation_hook_ids['up'] = keyboard.add_hotkey('up', lambda: self.rotate_main_window('up'))
-        self.rotation_hook_ids['down'] = keyboard.add_hotkey('down', lambda: self.rotate_main_window('down'))
-        self.update_status("UP/DOWN hotkeys are ENABLED and registered.")
+    def _enable_ahk_keybinds(self):
+        """Registers all AHK hotkeys to be active."""
+        if not self.ahk_hook_ids: # Only register if not already registered
+            self.ahk_hook_ids['up'] = keyboard.add_hotkey('up', lambda: self.rotate_main_window('up'))
+            self.ahk_hook_ids['down'] = keyboard.add_hotkey('down', lambda: self.rotate_main_window('down'))
+            self.ahk_hook_ids['f7'] = keyboard.add_hotkey('f7', self._toggle_g_presser_gui)
+            self.ahk_hook_ids['f10'] = keyboard.add_hotkey('f10', self._toggle_inactive_sender_gui)
+            self.ahk_hook_ids['p'] = keyboard.add_hotkey('p', lambda: self._send_key_to_all_dd2_windows('esc'))
+            self.ahk_hook_ids['n'] = keyboard.add_hotkey('n', lambda: self._send_key_to_all_dd2_windows('m'))
+            self.ahk_hook_ids['y'] = keyboard.add_hotkey('y', lambda: self._send_key_to_all_dd2_windows('y'))
+            self.ahk_hook_ids['g'] = keyboard.add_hotkey('g', lambda: self._send_key_to_all_dd2_windows('g'))
+            self.ahk_hook_ids['page up'] = keyboard.add_hotkey('page up', lambda: self._send_key_to_all_dd2_windows('pgup'))
+            self.ahk_hook_ids['page down'] = keyboard.add_hotkey('page down', lambda: self._send_key_to_all_dd2_windows('pgdn'))
+            self.ahk_hook_ids['b'] = keyboard.add_hotkey('b', lambda: self._send_key_to_inactive_dd2_windows('m'))
+            self.ahk_hook_ids['f9'] = keyboard.add_hotkey('f9', self._on_closing)
+            self.update_status("All AHK hotkeys are ENABLED and registered.")
 
-    def _disable_rotation_hotkeys(self):
-        """Disables the UP and DOWN hotkeys."""
-        if 'up' in self.rotation_hook_ids:
-            self.rotation_hook_ids['up']() # Call the stored unhook function
-            del self.rotation_hook_ids['up']
-        if 'down' in self.rotation_hook_ids:
-            self.rotation_hook_ids['down']() # Call the stored unhook function
-            del self.rotation_hook_ids['down']
-        self.update_status("UP/DOWN hotkeys unhooked.")
+    def _disable_ahk_keybinds(self):
+        """Disables all AHK hotkeys."""
+        for key, hook_id in list(self.ahk_hook_ids.items()):
+            keyboard.remove_hotkey(hook_id)
+            del self.ahk_hook_ids[key]
+        self.update_status("All AHK hotkeys unhooked.")
 
 
 
@@ -597,8 +643,8 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         """
         Rotates the main window selection.
         """
-        if not self.rotation_hotkeys_enabled:
-            self.update_status("Rotation hotkeys are disabled. Cannot rotate main window.")
+        if not self.ahk_keybinds_enabled:
+            self.update_status("AHK Keybinds are disabled. Cannot rotate main window.")
             return
         if self.find_dd2_windows() < 1:
             self.update_status("No DD2 windows found to rotate.")
@@ -854,31 +900,24 @@ class WindowManager(tk.Tk): # Inherit from tk.Tk
         self._toggle_g_presser()
         if self.g_presser_enabled:
             self.g_presser_status_label.config(text="G-Presser (F7): ON")
+            self.g_presser_toggle_button.config(style='On.TButton') # Apply 'On' style
         else:
             self.g_presser_status_label.config(text="G-Presser (F7): OFF")
+            self.g_presser_toggle_button.config(style='TButton') # Revert to default style
 
     def _toggle_inactive_sender_gui(self):
         self._toggle_inactive_sender()
         if self.inactive_sender_enabled:
             self.inactive_sender_status_label.config(text="Inactive Sender (F10): ON")
+            self.inactive_sender_toggle_button.config(style='On.TButton') # Apply 'On' style
         else:
             self.inactive_sender_status_label.config(text="Inactive Sender (F10): OFF")
+            self.inactive_sender_toggle_button.config(style='TButton') # Revert to default style
 
     def _register_ahk_hotkeys(self):
-        """Registers hotkeys from the AHK script functionality."""
-        keyboard.add_hotkey('f7', self._toggle_g_presser_gui)
-        keyboard.add_hotkey('f10', self._toggle_inactive_sender_gui)
-        keyboard.add_hotkey('p', lambda: self._send_key_to_all_dd2_windows('esc'))
-        keyboard.add_hotkey('n', lambda: self._send_key_to_all_dd2_windows('m'))
-        keyboard.add_hotkey('y', lambda: self._send_key_to_all_dd2_windows('y'))
-        keyboard.add_hotkey('g', lambda: self._send_key_to_all_dd2_windows('g'))
-        keyboard.add_hotkey('page up', lambda: self._send_key_to_all_dd2_windows('pgup'))
-        keyboard.add_hotkey('page down', lambda: self._send_key_to_all_dd2_windows('pgdn'))
-        keyboard.add_hotkey('b', lambda: self._send_key_to_inactive_dd2_windows('m'))
-        
-        # F9 (Emergency Kill Switch)
-        keyboard.add_hotkey('f9', self._on_closing)
-        self.update_status("AHK hotkeys registered.")
+        """Initializes and registers all AHK-style hotkeys."""
+        self._enable_ahk_keybinds()
+        self.update_status("AHK hotkeys registered (via _enable_ahk_keybinds).")
 
     def _send_key_to_window(self, hwnd, vk_code, key_delay=20):
         """Sends a key press (down and up) to a specific window."""
